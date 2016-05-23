@@ -1,4 +1,4 @@
 .. code-block:: shell
 
-   commctl cluster restart start datacenter1
+   commctl cluster start restart datacenter1
    ...
