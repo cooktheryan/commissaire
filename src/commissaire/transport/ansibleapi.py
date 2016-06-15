@@ -16,6 +16,8 @@
 Ansible API transport.
 """
 
+import logging
+
 from collections import namedtuple
 from pkg_resources import resource_filename
 from time import sleep
@@ -27,7 +29,6 @@ from ansible.playbook.play import Play
 from ansible.executor.task_queue_manager import TaskQueueManager
 from ansible.plugins.callback import default
 from ansible.utils.display import Display
-from commissaire.compat.logger import logging
 
 
 class LogForward(default.CallbackModule):
@@ -102,7 +103,7 @@ class Transport:
     Transport using Ansible.
     """
 
-    def __init__(self):
+    def __init__(self, remote_user='root'):
         """
         Creates an instance of the Transport.
         """
@@ -117,6 +118,7 @@ class Transport:
         self.variable_manager = VariableManager()
         self.loader = DataLoader()
         self.passwords = {}
+        self.remote_user = remote_user
 
     def _run(self, ips, key_file, play_file,
              expected_results=[0], play_vars={}):
@@ -125,7 +127,7 @@ class Transport:
 
         :param ips: IP address(es) to check.
         :type ips: str or list
-        :param key_file: Full path the the file holding the private SSH key.
+        :param key_file: Full path to the file holding the private SSH key.
         :type key_file: string
         :param play_file: Path to the ansible play file.
         :type play_file: str
@@ -139,12 +141,23 @@ class Transport:
 
         ssh_args = ('-o StrictHostKeyChecking=no -o '
                     'ControlMaster=auto -o ControlPersist=60s')
+        become = {
+            'become': None,
+            'become_user': None,
+        }
+        if self.remote_user != 'root':
+            self.logger.debug('Using user {0} for ssh communication.'.format(
+                self.remote_user))
+            become['become'] = True
+            become['become_user'] = 'root'
+
         options = self.Options(
             connection='ssh', module_path=None, forks=1,
-            remote_user='root', private_key_file=key_file,
+            remote_user=self.remote_user, private_key_file=key_file,
             ssh_common_args=ssh_args, ssh_extra_args=ssh_args,
             sftp_extra_args=None, scp_extra_args=None,
-            become=None, become_method=None, become_user=None,
+            become=become['become'], become_method='sudo',
+            become_user=become['become_user'],
             verbosity=None, check=False)
         # create inventory and pass to var manager
         inventory = Inventory(
@@ -213,41 +226,68 @@ class Transport:
         self.logger.debug('{0}: Bad result {1}'.format(ip, result))
         raise Exception('Can not run for {0}'.format(ip))
 
-    def upgrade(self, ips, key_file, oscmd):
+    def deploy(self, ips, key_file, oscmd, kwargs):
+        """
+        Deploys a tree image on a host via ansible.
+
+        :param ips: IP address(es) to upgrade.
+        :type ips: str or list
+        :param key_file: Full path to the file holding the private SSH key.
+        :type key_file: str
+        :param oscmd: OSCmd class to use
+        :type oscmd: commissaire.oscmd.OSCmdBase
+        :param kwargs: keyword arguments for the remote command
+        :type kwargs: dict
+        :returns: tuple -- (exitcode(int), facts(dict)).
+        """
+        play_file = resource_filename(
+            'commissaire', 'data/ansible/playbooks/deploy.yaml')
+        deploy_command = " ".join(oscmd.deploy(kwargs['version']))
+        return self._run(
+            ips, key_file, play_file, [0],
+            {'commissaire_deploy_command': deploy_command})
+
+    def upgrade(self, ips, key_file, oscmd, kwargs):
         """
         Upgrades a host via ansible.
 
         :param ips: IP address(es) to upgrade.
         :type ips: str or list
-        :param key_file: Full path the the file holding the private SSH key.
+        :param key_file: Full path to the file holding the private SSH key.
+        :type key_file: str
         :param oscmd: OSCmd class to use
         :type oscmd: commissaire.oscmd.OSCmdBase
-        :type key_file: str
+        :param kwargs: keyword arguments for the remote command
+        :type kwargs: dict
         :returns: tuple -- (exitcode(int), facts(dict)).
         """
         play_file = resource_filename(
             'commissaire', 'data/ansible/playbooks/upgrade.yaml')
+        upgrade_command = " ".join(oscmd.upgrade())
         return self._run(
             ips, key_file, play_file, [0],
-            {'commissaire_upgrade_command': " ".join(oscmd.upgrade())})
+            {'commissaire_upgrade_command': upgrade_command})
 
-    def restart(self, ips, key_file, oscmd):
+    def restart(self, ips, key_file, oscmd, kwargs):
         """
         Restarts a host via ansible.
 
         :param ips: IP address(es) to restart.
         :type ips: str or list
-        :param key_file: Full path the the file holding the private SSH key.
+        :param key_file: Full path to the file holding the private SSH key.
         :type key_file: str
         :param oscmd: OSCmd class to use
         :type oscmd: commissaire.oscmd.OSCmdBase
+        :param kwargs: keyword arguments for the remote command
+        :type kwargs: dict
         :returns: tuple -- (exitcode(int), facts(dict)).
         """
         play_file = resource_filename(
             'commissaire', 'data/ansible/playbooks/restart.yaml')
+        restart_command = " ".join(oscmd.restart())
         return self._run(
             ips, key_file, play_file, [0, 2],
-            {'commissaire_restart_command': " ".join(oscmd.restart())})
+            {'commissaire_restart_command': restart_command})
 
     def get_info(self, ip, key_file):
         """
@@ -255,7 +295,7 @@ class Transport:
 
         :param ip: IP address to check.
         :type ip: str
-        :param key_file: Full path the the file holding the private SSH key.
+        :param key_file: Full path to the file holding the private SSH key.
         :type key_file: str
         :returns: tuple -- (exitcode(int), facts(dict)).
         """
@@ -300,7 +340,7 @@ class Transport:
 
         :param ip: IP address to reboot.
         :type ip: str
-        :param key_file: Full path the the file holding the private SSH key.
+        :param key_file: Full path to the file holding the private SSH key.
         :type key_file: str
         :param config: Configuration information.
         :type config: commissaire.config.Config

@@ -17,7 +17,6 @@ Test cases for the commissaire.script module.
 """
 
 import argparse
-import contextlib
 import errno
 import etcd
 import falcon
@@ -42,7 +41,6 @@ class Test_CreateApp(TestCase):
         with mock.patch('cherrypy.engine.publish') as _publish:
             _publish.return_value = [[[], etcd.EtcdKeyNotFound]]
             app = script.create_app(
-                None,
                 'commissaire.authentication.httpbasicauth',
                 {'filepath': os.path.realpath('../conf/users.json')})
             self.assertTrue(isinstance(app, falcon.API))
@@ -104,10 +102,8 @@ class Test_ParseArgs(TestCase):
         for argv in failing_cases:
             sys.argv = argv
             parser = argparse.ArgumentParser()
-            with contextlib.nested(
-                    mock.patch('__builtin__.open'),
-                    mock.patch('argparse.ArgumentParser._print_message')
-                ) as (_open, _print):
+            with mock.patch('__builtin__.open') as _open, \
+                 mock.patch('argparse.ArgumentParser._print_message') as _print:
                 # Make sure no config file is opened.
                 _open.side_effect = IOError(
                     errno.ENOENT, os.strerror(errno.ENOENT))

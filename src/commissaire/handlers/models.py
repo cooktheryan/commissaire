@@ -66,6 +66,17 @@ class Cluster(Model):
         return self
 
 
+class ClusterDeploy(Model):
+    """
+    Representation of a Cluster deploy operation.
+    """
+    _json_type = dict
+    _attributes = (
+        'status', 'version', 'deployed', 'in_process',
+        'started_at', 'finished_at')
+    _key = '/commissaire/cluster/{0}/deploy'
+
+
 class ClusterRestart(Model):
     """
     Representation of a Cluster restart operation.
@@ -83,8 +94,7 @@ class ClusterUpgrade(Model):
     """
     _json_type = dict
     _attributes = (
-        'status', 'upgrade_to', 'upgraded', 'in_process',
-        'started_at', 'finished_at')
+        'status', 'upgraded', 'in_process', 'started_at', 'finished_at')
     _key = '/commissaire/cluster/{0}/upgrade'
 
 
@@ -125,8 +135,8 @@ class Host(Model):
     _json_type = dict
     _attributes = (
         'address', 'status', 'os', 'cpus', 'memory',
-        'space', 'last_check', 'ssh_priv_key')
-    _hidden_attributes = ('ssh_priv_key', )
+        'space', 'last_check', 'ssh_priv_key', 'remote_user')
+    _hidden_attributes = ('ssh_priv_key', 'remote_user')
     _key = '/commissaire/hosts/{0}'
 
 

@@ -19,15 +19,15 @@ The clusterexec job.
 import cherrypy
 import datetime
 import json
+import logging
 import tempfile
 
 from commissaire.transport import ansibleapi
 from commissaire.compat.b64 import base64
-from commissaire.compat.logger import logging
 from commissaire.oscmd import get_oscmd
 
 
-def clusterexec(cluster_name, command):
+def clusterexec(cluster_name, command, kwargs={}):
     """
     Remote executes a shell commands across a cluster.
 
@@ -37,11 +37,11 @@ def clusterexec(cluster_name, command):
     logger = logging.getLogger('clusterexec')
 
     # TODO: This is a hack and should really be done elsewhere
+    command_args = ()
     if command == 'upgrade':
         finished_hosts_key = 'upgraded'
         cluster_status = {
             "status": 'in_process',
-            "upgrade_to": 'latest',
             "upgraded": [],
             "in_process": [],
             "started_at": datetime.datetime.utcnow().isoformat(),
@@ -52,6 +52,18 @@ def clusterexec(cluster_name, command):
         cluster_status = {
             "status": 'in_process',
             "restarted": [],
+            "in_process": [],
+            "started_at": datetime.datetime.utcnow().isoformat(),
+            "finished_at": None
+        }
+    elif command == 'deploy':
+        finished_hosts_key = 'deployed'
+        version = kwargs.get('version')
+        command_args = (version,)
+        cluster_status = {
+            "status": 'in_process',
+            "version": version,
+            "deployed": [],
             "in_process": [],
             "started_at": datetime.datetime.utcnow().isoformat(),
             "finished_at": None
@@ -102,7 +114,8 @@ def clusterexec(cluster_name, command):
             continue  # Move on to the next one
         oscmd = get_oscmd(a_host['os'])
 
-        command_list = getattr(oscmd, command)()  # Only used for logging
+        # command_list is only used for logging
+        command_list = getattr(oscmd, command)(*command_args)
         logger.info('Executing {0} on {1}...'.format(
             command_list, a_host['address']))
 
@@ -123,10 +136,10 @@ def clusterexec(cluster_name, command):
         f.close()
 
         try:
-            transport = ansibleapi.Transport()
+            transport = ansibleapi.Transport(a_host['remote_user'])
             exe = getattr(transport, command)
             result, facts = exe(
-                a_host['address'], key_file, oscmd)
+                a_host['address'], key_file, oscmd, kwargs)
         # XXX: ansibleapi explicitly raises Exception()
         except Exception:
             # If there was a failure set the end_status and break out

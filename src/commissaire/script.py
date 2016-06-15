@@ -18,6 +18,8 @@
 import argparse
 import cherrypy
 import json
+import logging
+import logging.config
 import os
 import sys
 
@@ -26,31 +28,25 @@ import falcon
 
 from commissaire.compat.urlparser import urlparse
 from commissaire.compat import exception
-from commissaire.compat.logger import logging
 from commissaire.config import Config, cli_etcd_or_default
 from commissaire.handlers.clusters import (
     ClustersResource, ClusterResource,
     ClusterHostsResource, ClusterSingleHostResource,
-    ClusterRestartResource, ClusterUpgradeResource)
+    ClusterDeployResource, ClusterRestartResource,
+    ClusterUpgradeResource)
 from commissaire.handlers.hosts import (
     HostsResource, HostResource, ImplicitHostResource)
 from commissaire.handlers.status import StatusResource
-from commissaire.queues import INVESTIGATE_QUEUE
-from commissaire.jobs import PROCS
-from commissaire.jobs.investigator import investigator
 from commissaire.middleware import JSONify
 from commissaire.ssl_adapter import ClientCertBuiltinSSLAdapter
 
 
 def create_app(
-        store,
         authentication_module_name,
         authentication_kwargs):
     """
     Creates a new WSGI compliant commissaire application.
 
-    :param store: The etcd client to for storing/retrieving data.
-    :type store: etcd.Client
     :param authentication_module_name: Full name of the authentication module.
     :type authentication_module_name: str
     :param authentication_kwargs: Keyword arguments to pass to the auth mod.
@@ -69,24 +65,27 @@ def create_app(
 
     app = falcon.API(middleware=[authentication, JSONify()])
 
-    app.add_route('/api/v0/status', StatusResource(store, None))
-    app.add_route('/api/v0/cluster/{name}', ClusterResource(store, None))
+    app.add_route('/api/v0/status', StatusResource())
+    app.add_route('/api/v0/cluster/{name}', ClusterResource())
     app.add_route(
         '/api/v0/cluster/{name}/hosts',
-        ClusterHostsResource(store, None))
+        ClusterHostsResource())
     app.add_route(
         '/api/v0/cluster/{name}/hosts/{address}',
-        ClusterSingleHostResource(store, None))
+        ClusterSingleHostResource())
+    app.add_route(
+        '/api/v0/cluster/{name}/deploy',
+        ClusterDeployResource())
     app.add_route(
         '/api/v0/cluster/{name}/restart',
-        ClusterRestartResource(store, None))
+        ClusterRestartResource())
     app.add_route(
         '/api/v0/cluster/{name}/upgrade',
-        ClusterUpgradeResource(store, None))
-    app.add_route('/api/v0/clusters', ClustersResource(store, None))
-    app.add_route('/api/v0/host', ImplicitHostResource(store, None))
-    app.add_route('/api/v0/host/{address}', HostResource(store, None))
-    app.add_route('/api/v0/hosts', HostsResource(store, None))
+        ClusterUpgradeResource())
+    app.add_route('/api/v0/clusters', ClustersResource())
+    app.add_route('/api/v0/host', ImplicitHostResource())
+    app.add_route('/api/v0/host/{address}', HostResource())
+    app.add_route('/api/v0/hosts', HostsResource())
     return app
 
 
@@ -148,10 +147,7 @@ def _read_config_file(path=None):
                         'File content must be a JSON object')
 
     # Normalize member names by converting hypens to underscores.
-    # FIXME Use a dictionary comprehension here when we no longer
-    #       have to support Python 2.6.
-    json_object = dict([(k.replace('-', '_'), v)
-                        for k, v in json_object.items()])
+    json_object = {k.replace('-', '_'): v for k, v in json_object.items()}
 
     # Special case:
     #
@@ -198,7 +194,9 @@ def parse_args(parser):
         '--listen-port', '-p', type=int, help='Port to listen on')
     parser.add_argument(
         '--etcd-uri', '-e', type=str,
-        help='Full URI for etcd EX: http://127.0.0.1:2379')
+        help=('Full URI for etcd. This value is used for both local and remote'
+              ' host node connections to etcd.'
+              ' EX: http://192.168.152.100:2379'))
     parser.add_argument(
         '--etcd-cert-path', '-C', type=str,
         help='Full path to the client side certificate.')
@@ -210,7 +208,9 @@ def parse_args(parser):
         help='Full path to the CA file.')
     parser.add_argument(
         '--kube-uri', '-k', type=str,
-        help='Full URI for kubernetes EX: http://127.0.0.1:8080')
+        help=('Full URI for kubernetes. This value is used for both local and'
+              ' remote host node connection to kubernetes.'
+              ' EX: http://192.168.152.101:8080'))
     parser.add_argument(
         '--tls-keyfile', type=str,
         help='Full path to the TLS keyfile for the commissaire server')
@@ -254,8 +254,8 @@ def main():  # pragma: no cover
     """
     Main script entry point.
     """
-    from multiprocessing import Process
-    from commissaire.cherrypy_plugins import CherryPyStorePlugin
+    from commissaire.cherrypy_plugins.store import StorePlugin
+    from commissaire.cherrypy_plugins.investigator import InvestigatorPlugin
     config = Config()
 
     epilog = ('Example: ./commissaire -e http://127.0.0.1:2379'
@@ -399,16 +399,18 @@ def main():  # pragma: no cover
         logging.info('Commissaire server TLS will be enabled.')
     server.subscribe()
 
+    # Handle UNIX signals (SIGTERM, SIGHUP, SIGUSR1)
+    if hasattr(cherrypy.engine, 'signal_handler'):
+        cherrypy.engine.signal_handler.subscribe()
+
     # Add our plugins
-    CherryPyStorePlugin(cherrypy.engine, store_kwargs).subscribe()
+    StorePlugin(cherrypy.engine, store_kwargs).subscribe()
+    InvestigatorPlugin(
+        cherrypy.engine, config, store_kwargs).subscribe()
+
     # NOTE: Anything that requires etcd should start AFTER
     # the engine is started
     cherrypy.engine.start()
-
-    # Start processes
-    PROCS['investigator'] = Process(
-        target=investigator, args=(INVESTIGATE_QUEUE, config))
-    PROCS['investigator'].start()
 
     try:
         # Make and mount the app
@@ -423,7 +425,6 @@ def main():  # pragma: no cover
             authentication_kwargs = args.authentication_plugin_kwargs
 
         app = create_app(
-            ds,
             args.authentication_plugin,
             authentication_kwargs)
         cherrypy.tree.graft(app, "/")
@@ -434,9 +435,6 @@ def main():  # pragma: no cover
         _, ex, _ = exception.raise_if_not(Exception)
         logging.fatal('Unable to start server: {0}'.format(ex))
         cherrypy.engine.stop()
-
-    PROCS['investigator'].terminate()
-    PROCS['investigator'].join()
 
 
 if __name__ == '__main__':  # pragma: no cover

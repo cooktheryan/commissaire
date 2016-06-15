@@ -16,7 +16,6 @@
 Test cases for the commissaire.handlers.clusters module.
 """
 
-import contextlib
 import json
 import mock
 
@@ -71,11 +70,7 @@ class Test_ClustersResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = etcd.Client()
-        self.return_value = MagicMock(etcd.EtcdResult)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.get.return_value = self.return_value
-        self.resource = clusters.ClustersResource(self.datasource)
+        self.resource = clusters.ClustersResource()
         self.api.add_route('/api/v0/clusters', self.resource)
 
     def test_clusters_listing(self):
@@ -158,7 +153,8 @@ class Test_ClusterResource(TestCase):
                 '           "unavailable": 0}}')
 
     etcd_cluster = '{"status": "ok", "hostset": ["10.2.0.2"]}'
-    etcd_host = ('{"address": "10.2.0.2", "ssh_priv_key": "dGVzdAo=",'
+    etcd_host = ('{"address": "10.2.0.2",'
+                 ' "ssh_priv_key": "dGVzdAo=", "remote_user": "root",'
                  ' "status": "active", "os": "atomic",'
                  ' "cpus": 2, "memory": 11989228, "space": 487652,'
                  ' "last_check": "2015-12-17T15:48:18.710454",'
@@ -166,15 +162,7 @@ class Test_ClusterResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = MagicMock(etcd.Client)
-        self.return_value = MagicMock(etcd.EtcdResult)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.get.return_value = self.return_value
-        self.datasource.set = MagicMock(name='set')
-        self.datasource.set.return_value = self.return_value
-        self.datasource.delete = MagicMock(name='delete')
-        self.datasource.delete.return_value = self.return_value
-        self.resource = clusters.ClusterResource(self.datasource)
+        self.resource = clusters.ClusterResource()
         self.api.add_route('/api/v0/cluster/{name}', self.resource)
 
     def test_cluster_retrieve(self):
@@ -289,10 +277,7 @@ class Test_ClusterRestartResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = MagicMock(etcd.Client)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.set = MagicMock(name='set')
-        self.resource = clusters.ClusterRestartResource(self.datasource)
+        self.resource = clusters.ClusterRestartResource()
         self.api.add_route('/api/v0/cluster/{name}/restart', self.resource)
 
     def test_cluster_restart_retrieve(self):
@@ -321,11 +306,9 @@ class Test_ClusterRestartResource(TestCase):
         # etcd.Client Patched to avoid the internal connection
         # Process is patched because we don't want to exec the subprocess
         # during unittesting
-        with contextlib.nested(
-                mock.patch('cherrypy.engine.publish'),
-                mock.patch('etcd.Client'),
-                mock.patch('commissaire.handlers.clusters.Process')) as (
-                    _publish, _, _):
+        with mock.patch('cherrypy.engine.publish') as _publish, \
+             mock.patch('etcd.Client'), \
+             mock.patch('commissaire.handlers.clusters.Process'):
 
             _publish.side_effect = (
                 [[MagicMock(value=self.etcd_cluster), None]],
@@ -353,13 +336,7 @@ class Test_ClusterHostsResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = MagicMock(etcd.Client)
-        self.return_value = MagicMock(etcd.EtcdResult)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.get.return_value = self.return_value
-        self.datasource.set = MagicMock(name='set')
-        self.datasource.set.return_value = self.return_value
-        self.resource = clusters.ClusterHostsResource(self.datasource)
+        self.resource = clusters.ClusterHostsResource()
         self.api.add_route('/api/v0/cluster/{name}/hosts', self.resource)
 
     def test_cluster_hosts_retrieve(self):
@@ -391,8 +368,6 @@ class Test_ClusterHostsResource(TestCase):
             # Verify setting host list works with a proper request
             _publish.return_value = [[MagicMock(
                 value=self.etcd_cluster), None]]
-            # self.datasource.get.return_value = MagicMock(
-            #    value=self.etcd_cluster)
             body = self.simulate_request(
                 '/api/v0/cluster/development/hosts', method='PUT',
                 body='{"old": ["10.2.0.2"], "new": ["10.2.0.2", "10.2.0.3"]}')
@@ -444,15 +419,7 @@ class Test_ClusterSingleHostResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = MagicMock(etcd.Client)
-        self.return_value = MagicMock(etcd.EtcdResult)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.get.return_value = self.return_value
-        self.datasource.set = MagicMock(name='set')
-        self.datasource.set.return_value = self.return_value
-        self.datasource.write = MagicMock(name='set')
-        self.datasource.write.return_value = self.return_value
-        self.resource = clusters.ClusterSingleHostResource(self.datasource)
+        self.resource = clusters.ClusterSingleHostResource()
         self.api.add_route(
             '/api/v0/cluster/{name}/hosts/{address}', self.resource)
 
@@ -542,7 +509,7 @@ class Test_ClusterUpgrade(TestCase):
 
         # Make sure a Cluster Upgrade creates expected results
         cluster_upgrade_model = clusters.ClusterUpgrade(
-            status='in_process', upgrade_to='', upgraded=[], in_process=[],
+            status='in_process', upgraded=[], in_process=[],
             started_at=None, finished_at=None)
 
         self.assertEquals(type(str()), type(cluster_upgrade_model.to_json()))
@@ -553,7 +520,7 @@ class Test_ClusterUpgradeResource(TestCase):
     Tests for the ClusterUpgrade resource.
     """
 
-    aupgrade = ('{"status": "ok", "upgrade_to": "7.0.2", "upgraded": [],'
+    aupgrade = ('{"status": "ok", "upgraded": [],'
                 ' "in_process": [], "started_at": "",'
                 ' "finished_at": "0001-01-01T00:00:00"}')
 
@@ -561,10 +528,7 @@ class Test_ClusterUpgradeResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = MagicMock(etcd.Client)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.set = MagicMock(name='set')
-        self.resource = clusters.ClusterUpgradeResource(self.datasource)
+        self.resource = clusters.ClusterUpgradeResource()
         self.api.add_route('/api/v0/cluster/{name}/upgrade', self.resource)
 
     def test_cluster_upgrade_retrieve(self):
@@ -573,8 +537,6 @@ class Test_ClusterUpgradeResource(TestCase):
         """
         with mock.patch('cherrypy.engine.publish') as _publish:
             # Verify if the cluster upgrade exists the data is returned
-            self.datasource.get.return_value = MagicMock(
-                'etcd.EtcdResult', value=self.etcd_cluster)
             _publish.return_value = [[MagicMock(value=self.aupgrade), None]]
             body = self.simulate_request('/api/v0/cluster/development/upgrade')
             self.assertEqual(falcon.HTTP_200, self.srmock.status)
@@ -598,37 +560,20 @@ class Test_ClusterUpgradeResource(TestCase):
         # etcd.Client Patched to avoid the internal connection
         # Process is patched because we don't want to exec the subprocess
         # during unittesting
-        with contextlib.nested(
-                mock.patch('cherrypy.engine.publish'),
-                mock.patch('etcd.Client'),
-                mock.patch('commissaire.handlers.clusters.Process')) as (
-                    _publish, _, _):
-            self.datasource.get.side_effect = (
-                MagicMock(value=self.etcd_cluster),
-                etcd.EtcdKeyNotFound)
+        with mock.patch('cherrypy.engine.publish') as _publish, \
+             mock.patch('etcd.Client'), \
+             mock.patch('commissaire.handlers.clusters.Process'):
 
             _publish.side_effect = (
                 [[MagicMock(value=self.etcd_cluster), None]],
                 [[[], etcd.EtcdKeyNotFound]],
                 [[MagicMock(etcd.EtcdResult, value=self.aupgrade), None]])
 
-            # Verify sending no/bad data returns a 400
-            for put_data in (None, '{"nothing": "here"}"'):
-                body = self.simulate_request(
-                    '/api/v0/cluster/development/upgrade',
-                    method='PUT',
-                    body=put_data)
-                self.assertEquals(falcon.HTTP_400, self.srmock.status)
-                self.assertEquals('{}', body[0])
-
             # Verify with creation
             body = self.simulate_request(
-                '/api/v0/cluster/development/upgrade',
-                method='PUT',
-                body='{"upgrade_to": "7.0.2"}')
+                '/api/v0/cluster/development/upgrade', method='PUT')
             self.assertEquals(falcon.HTTP_201, self.srmock.status)
             result = json.loads(body[0])
             self.assertEquals('in_process', result['status'])
-            self.assertEquals('7.0.2', result['upgrade_to'])
             self.assertEquals([], result['upgraded'])
             self.assertEquals([], result['in_process'])

@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
-CherryPy plugin for storing objects.
+Custom CherryPy plugins for commissaire.
 """
 
 import sys
@@ -23,7 +23,7 @@ import etcd
 from cherrypy.process import plugins
 
 
-class CherryPyStorePlugin(plugins.SimplePlugin):
+class StorePlugin(plugins.SimplePlugin):
 
     def __init__(self, bus, store_kwargs):
         """
@@ -137,3 +137,7 @@ class CherryPyStorePlugin(plugins.SimplePlugin):
         except:
             _, exc, _ = sys.exc_info()
             return ([], exc)
+
+
+#: Generic name for the plugin
+Plugin = StorePlugin

@@ -109,12 +109,16 @@ def impl(context, async_operation, cluster):
     if async_operation == 'an upgrade':
         context.request = requests.put(
             context.SERVER + '/api/v0/cluster/{0}/upgrade'.format(cluster),
-            auth=context.auth,
-            json={"upgrade_to": "7.2.1"})
+            auth=context.auth)
     elif async_operation == 'a restart':
         context.request = requests.put(
             context.SERVER + '/api/v0/cluster/{0}/restart'.format(cluster),
             auth=context.auth)
+    elif async_operation == 'a tree deployment':
+        context.request = requests.put(
+            context.SERVER + '/api/v0/cluster/{0}/deploy'.format(cluster),
+            auth=context.auth,
+            data=json.dumps({'version': '1.2.3'}))
     else:
         raise NotImplementedError
 
@@ -160,11 +164,14 @@ def impl(context, host, cluster):
 def impl(context, async_operation):
     json = context.request.json()
     if async_operation == 'upgrade':
-        expected_keys = set(('status', 'upgrade_to', 'upgraded',
+        expected_keys = set(('status', 'upgraded',
                              'in_process', 'started_at', 'finished_at'))
     elif async_operation == 'restart':
         expected_keys = set(('status', 'restarted', 'in_process',
                              'started_at', 'finished_at'))
+    elif async_operation == 'deployment':
+        expected_keys = set(('status', 'version', 'deployed',
+                             'in_process', 'started_at', 'finished_at'))
     actual_keys = set(json.keys())
     assert actual_keys == expected_keys, \
            'Expected keys {0}, got {1}'.format(expected_keys, actual_keys)

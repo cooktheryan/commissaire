@@ -26,7 +26,6 @@ from . import TestCase
 from mock import MagicMock
 from commissaire.handlers import status
 from commissaire.middleware import JSONify
-from commissaire.jobs import PROCS
 
 
 class Test_Status(TestCase):
@@ -59,11 +58,8 @@ class Test_StatusResource(TestCase):
 
     def before(self):
         self.api = falcon.API(middleware=[JSONify()])
-        self.datasource = etcd.Client()
         self.return_value = MagicMock(etcd.EtcdResult)
-        self.datasource.get = MagicMock(name='get')
-        self.datasource.get.return_value = self.return_value
-        self.resource = status.StatusResource(self.datasource)
+        self.resource = status.StatusResource()
         self.api.add_route('/api/v0/status', self.resource)
 
     def test_status_retrieve(self):
@@ -75,12 +71,6 @@ class Test_StatusResource(TestCase):
             self.return_value._children = [child]
             self.return_value.leaves = self.return_value._children
             _publish.return_value = [[self.return_value, None]]
-
-            for proc in ('investigator', ):
-                PROCS[proc] = MagicMock(
-                    'multiprocessing.Process',
-                    is_alive=MagicMock(return_value=True),
-                )
 
             body = self.simulate_request('/api/v0/status')
             self.assertEqual(self.srmock.status, falcon.HTTP_200)
